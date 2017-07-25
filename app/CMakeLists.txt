@@ -33,6 +33,7 @@ add_library(native-lib
              SHARED
              src/main/cpp/native-lib.cpp
              src/main/cpp/ocl.cpp
+             src/main/cpp/opencv_ocl.cpp
              )
 
 find_library(
@@ -47,8 +48,20 @@ else()
     set(log-lib ${log-lib} libOpenCL.so )
 endif()
 
+# find_package will search <package>_DIR to find <package>Config.cmake
+# <name>Config.cmake or <lower-case-name>-config.cmak
+# move to build.gradle
+# set(OpenCV_DIR E:\\temp\\opencv-3.2.0-rc\\build\\OpenCV-android-sdk\\sdk\\native\\jni )
+# set OpenCV_DIR variable to the absolute path to the directory containing OpenCVConfig.cmake file
+find_package(OpenCV REQUIRED)
+message(STATUS "OpenCV library status:")
+message(STATUS "    version: ${OpenCV_VERSION}")
+message(STATUS "    libraries: ${OpenCV_LIBS}")
+message(STATUS "    include path: ${OpenCV_INCLUDE_DIRS}")
+include_directories(${OpenCV_INCLUDE_DIRS})
 
 
 target_link_libraries( # Specifies the target library.
                        native-lib
-                       ${log-lib} )
+                       ${log-lib}
+                       ${OpenCV_LIBS} )
