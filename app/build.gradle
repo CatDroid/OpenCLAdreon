@@ -2,7 +2,7 @@ apply plugin: 'com.android.application'
 
 android {
     compileSdkVersion 24
-    buildToolsVersion "25.0.2"
+    buildToolsVersion "25.0.0"
     defaultConfig {
         applicationId "com.tom.opencladreon"
         minSdkVersion 21
@@ -13,7 +13,7 @@ android {
         externalNativeBuild {
             cmake {
                 cppFlags "-std=c++11 -frtti -fexceptions"
-                arguments "-DOPENCL_VENDOR=Dragon"  // Dragon:高通  MTK:MTK
+                arguments "-DOPENCL_VENDOR=MTK"  // Dragon:高通  MTK:MTK
             }
         }
 
@@ -26,6 +26,11 @@ android {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            debuggable false
+        }
+        debug {
+            debuggable true
+            jniDebuggable false
         }
     }
     externalNativeBuild {
@@ -36,5 +41,5 @@ android {
 }
 
 dependencies {
-    compile fileTree(dir: 'libs', include: ['*.jar'])
+    compile fileTree(include: ['*.jar'], dir: 'libs')
 }
