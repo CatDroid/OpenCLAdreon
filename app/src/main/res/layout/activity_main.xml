@@ -31,4 +31,20 @@
         android:layout_marginTop="54dp"
         android:text="Open cl" />
 
+    <Button
+        android:id="@+id/btnCVCL"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_alignParentEnd="true"
+        android:layout_alignParentTop="true"
+        android:text="CV_OCL" />
+
+    <Button
+        android:id="@+id/btnUMat"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_alignStart="@+id/btnCVCL"
+        android:layout_alignTop="@+id/textView2"
+        android:text="UMat" />
+
 </android.widget.RelativeLayout>
