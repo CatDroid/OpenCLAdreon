@@ -1,5 +1,5 @@
 //
-// Created by rd0394 on 2017/7/25.
+// Created by hl.he on 2017/7/25.
 //
 
 #include <malloc.h>
@@ -85,6 +85,7 @@ JNIEXPORT void JNICALL Java_com_tom_opencladreon_MainActivity_openCvOclMatMul(JN
     Mat matB=imread("/mnt/sdcard/lena.jpg",CV_LOAD_IMAGE_COLOR);
     ALOGD("matA dims %d type 0x%x channels 0x%x " ,  matA.dims  ,  matA.type() , matA.channels()  );
     // matA dims 2 type 0x10 channels 0x3
+    assert(matA.data!=NULL);
     /*
      * 0-2位代表depth即数据类型（如CV_8U）
         #define CV_8U   0
