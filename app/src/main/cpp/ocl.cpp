@@ -11,7 +11,6 @@
  *        库文件 来自MT6797
  */
 
-
 #include <malloc.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -23,6 +22,7 @@
 
 #include <jni.h>
 #include <android/log.h>
+#include "CostHelper.h"
 
 #define LOG_TAG "OCL"
 #define ALOGD(...) __android_log_print(ANDROID_LOG_DEBUG, LOG_TAG, __VA_ARGS__)
@@ -30,8 +30,8 @@
 
 #define LEN(arr) sizeof(arr) / sizeof(arr[0])
 #define N 1024
-#define NUM_THREAD 128
-
+#define NUM_THREAD 128  // 一个工作组里面的工作项目不能超过 CL_DEVICE_MAX_WORK_ITEM_SIZES
+                        // 否则计算错误 以及 clEnqueueNDRangeKernel 返回 -55 (e.g  NUM_THREAD 512 )
 int num_block;
 
 cl_uint num_device;
@@ -46,6 +46,72 @@ cl_program program ;
 cl_kernel kernel;
 
 // http://developer.amd.com/resources/articles-whitepapers/opencl-optimization-case-study-simple-reductions/
+/*
+    OpenCL采用的数据并行模型就是采用CUDA的数据并行模型
+
+    OpenCL			CUDA
+    Kernel函数		Kernel函数
+    主机程序		    主机程序
+    N-DRange		网格
+    工作项			线程
+    工作组			线程块
+
+    在设备端的程序中，CUDA主要是通过预定义的变量进行访问，而OpenCL是通过预定义的API访问
+
+    OPENCL					含义									    CUDA
+    get_global_id(0) 		工作项在X维度上的全局索引  				    blockIdx.x*blockDim.x+threadIdx.x
+    get_local_id(0)			工作项在工作组中X维度上的局部索引 		        threadIdx.x
+    get_global_size(0) 		N-DRange中X维度的大小 即线程数量		        gridDim.x*blockDim.x
+    get_local_size(0)		每个工作组X维度上的大小 即工作项在X维度上数目    blockDim.x
+
+    get_work_dim            工作组维度数目 1(X) 2(X Y) 3(X Y Z) 应该与全局的NRRange索引空间一样大
+    get_num_groups          工作组数目
+    get_group_id            工作组ID
+
+    C99标准扩展   99年ansi C
+    不支持:    头文件、函数指针、递归、变长数组
+    增加类型:
+            向量类型 char2  float4  int8
+            图像类型 image2d_t image3d_t  sampler_t
+            事件类型 event_t (可见于同步)
+
+    类型转换:
+        convert转换
+            按照'变量语意'的类型转换
+            convert_destType<_sat><_roundingMode>
+            destType 目标类型
+            _sat:超出范围自动归结为最大或最小表示的数
+            _roundingMode:  _rte:表示成最接近的偶数
+                            _rtz:朝0接近
+                            _rtp:朝正无穷大
+                            _rtn:朝负无穷大
+            float4 f4=(float4)(1.0f,2.0f,3.0f,4.0f)
+            int4 i4 = convert_int4_sat_rte(f4)
+
+        as转换
+            这是根据'bit值'重新解释的类型转换,这 个转换会保持 'bit值' 不变，在此基础上根据desttype重新解释数值
+            as_desttype  e.g as_int4()   as_float4()
+            desttype是目标类型
+            其中转换前后类型的vector size是要一样的 float4 <-- int4
+            float4 f4=(float4)(1.0f,2.0f,3.0f,4.0f)
+            int4 i4=as_int4(f4)
+
+    Work_group函数: 用于一个group内的item间的交互
+        同步函数  void barrier (	cl_mem_fence_flags flags)
+                 一个工作组内的所有工作项 必须全部执行完这个barrier函数之后 才能继续进行后续的事情
+                 也可看做这是所有item的一个同步点 不管谁快谁慢 必须到这个点停一下 等大家都到了这个点
+                 flags  CLK_LOCAL_MEM_FENCE和CLK_GLOBAL_MEM_FENCE
+                 e.g barrier(CLK_LOCAL_MEM_FENCE);
+
+        异步的内存copy和prefetch函数
+                async_work_group_copy  完成global与local之间 '异步'内存拷贝 拷贝可能用DMA
+                wait_group_events      来等待上面的event返回，用于同步
+                async_work_group_strided_copy  区别在从src抽取一部分域出来到dst
+                                                e.g 图形学 经常用一个大数组表示颜色 法向 纹理坐标等等
+                                                他们是连在一起的 如
+                                                    {color1,color2,color3,tex0,tex1,color1,color2,color3,text0,tex1,....}
+                                                这时我们需要抽取其中的color信息出来
+ */
 /** Device side OpenCL C code. **/
 const char* src[] = {
         "#ifdef cl_arm_printf \n"
@@ -53,14 +119,14 @@ const char* src[] = {
         "#endif \n"
         "  __kernel void reduction(  \n"
         "  __global int *data,     \n"
-        "  __global int *output,   \n"
-        "  __local int *data_local   \n" // 三个参数
+        "  __global int *output,   \n"   // 三个参数  都是指针类型变量 (int *)
+        "  __local int *data_local   \n" // 三个参数  最后一个声明为 __local
         "  )  \n"
         " {   \n"
         "  int gid=get_group_id(0);   \n"       // 获得工作组ID(相当于CUDA的线程块)   因为clEnqueueNDRangeKernel给定的维度数目是1
         "  int tid=get_global_id(0);    \n"     // 获得全局ID(相当于CUDA的线程)
         "  int size=get_local_size(0);   \n"    // 一个工作组中工作项的数目
-        "  int id=get_local_id(0);     \n"      // 获得本地ID
+        "  int id=get_local_id(0);     \n"      // 获得局部ID
         "  data_local[id]=data[tid];   \n"
         "#ifdef cl_arm_printf\n"
 //        "  printf( \"work item -%d- \\n\", tid  );\n" // 必须加上\\n
@@ -68,37 +134,45 @@ const char* src[] = {
          "  printf(\"work item -%d- \\n\" , size );\n"
          "#endif\n"
         "  barrier(CLK_LOCAL_MEM_FENCE);   \n"
-        "  for(int i=size/2;i>0;i>>=1){    \n"
+        "  for(int i=size/2;i>0;i>>=1){    \n" // 每次减半
         "      if(id<i){   \n"
-        "          data_local[id]+=data_local[id+i];   \n"
+        "          data_local[id]+=data_local[id+i];   \n" // id 超过 i 的 以后就不用计算了~ 直接barrier
+//        "          barrier(CLK_LOCAL_MEM_FENCE);   \n"   // 只有工作组里所有工作项都过了mem fence 大家才会一起继续执行
         "      }   \n"
         "      barrier(CLK_LOCAL_MEM_FENCE);   \n"
         "  }    \n"
-        "  if(id==0){    \n"
-        "      output[gid]=data_local[0];   \n"
+        "  if(id==0){    \n" // 局部ID为0的工作项
+        "      output[gid]=data_local[0];   \n" // 每个工作组 计算完结果 放到  output[gid]  output长度是工作组数量
         "  }    \n"
         " }   \n"
-
-};
+}; // 这个算法要 保证工作组的工作项数目 是 2个阶乘 这样确保了 每次除2  直到最后出现奇数一定是1的情况下
 
 /*
-
-    OpenCL采用的数据并行模型就是采用CUDA的数据并行模型
-
-    OpenCL			CUDA
-    Kernel函数		Kernel函数
-    主机程序		主机程序
-    N-DRange		网格
-    工作项			线程
-    工作组			线程块
-
- * OPENCL					含义									    CUDA
- * get_global_id(0) 		工作项在X维度上的全局索引  				    blockIdx.x*blockDim.x+threadIdx.x
- * get_local_id(0)			工作项在工作组中X维度上的局部索引 		        threadIdx.x
- * get_global_size(0) 		N-DRange中X维度的大小 即线程数量		        gridDim.x*blockDim.x
- * get_local_size(0)		每个工作组X维度上的大小 即工作项在X维度上数目    blockDim.x
+ *      算法原理:
+ *         假如一个工作组如下 有20个工作项
+ *         0  1  2  3  4  5  6  7  8  9    10  11 12 13 14 15 16 17 18 19   <--- data_local
+ *         .  .  .  .  .  .  .  .  .  .     .  .  .  .  .  .  .  .  .  .
+ *      第一轮                            | 一半 (size/2)
+ *         0和10 1和11 2和12  ... (data_local[id]和data_local[id+size/2}) 相加 放到 0 1 2 .... (data_local[id])
+ *        0+10  1+11  2+12  3+13  4+14    5+15  6+16  7+17  8+18  9+19       结果只有 0~size/2
+ *        .     .     .     .     .       .     .     .     .     .
+ *      第二轮                           | 再一半 (size/2 >> 1 )
+ *        (0+10)+(5+15)  (1+11)+(6+16)   (2+12)+(7+17)   (3+13)+(7+17)  (4+14)+(9+19)   结果只有 0~size/4
+ *                                      |
+ *                                      ? 这里会有错误  其实工作项  应该有 2的阶乘 2^N 个  这样保证
+ *
+ *
+ *       0      1      2       3       4       5       6       7         8  9  10  11  12  13  14  15
+ *       .      .      .       .       .       .       .       .         .  .  .   .   .   .   .   .
+ *                                                                     |
+ *       (0+8)  (1+9)  (2+10)  (3+11)  (4+12)  (5+13)  (6+14)  (7+15)
+ *                                    |
+ *       (0+8)+(5+13)  (1+9)+(5+13)  (2+10)+(6+14)  (3+11)+(7+15)
+ *                                  |
+ *       ((0+8)+(5+13))+((2+10)+(6+14))  ((1+9)+(5+13))+((3+11)+(7+15))
+ *                                     |
+ *        all~
  */
-
 void Init_OpenCL()
 {
     size_t nameLen1;
@@ -150,21 +224,22 @@ void Context_cmd()
     if(errcode_ret != CL_SUCCESS) ALOGE("clCreateCommandQueue fail");
 }
 
+/*
+ * clCreateBuffer
+ *
+ *  CL_MEM_USE_HOST_PTR
+ *      刚开始buffer object的值是来自于host_ptr
+ *      但buffer object处理之后,写回到host_ptr主机内存中
+ *  CL_MEM_COPY_HOST_PTR
+ *      buffer object的初始值使用host_ptr
+ *      buffer object操作完成后的值也不会写回到host_ptr主机内存中
+ *  CL_MEM_USE_PERSISTENT_MEM_AMD ???  MALI or Adreno
+ *      clCreateBuffer(context,  CL_MEM_READ_ONLY|CL_MEM_USE_PERSISTENT_MEM_AMD,  sizeof(float)*N,  0, &err);
+ *      clEnqueueMapBuffer
+ *      clEnqueueUnmapMemObject
+ */
 void Create_Buffer(int *data)
 {
-    /*
-     *  CL_MEM_USE_HOST_PTR
-     *      刚开始buffer object的值是来自于host_ptr
-     *      但buffer object处理之后,写回到host_ptr主机内存中
-     *  CL_MEM_COPY_HOST_PTR
-     *      buffer object的初始值使用host_ptr
-     *      buffer object操作完成后的值也不会写回到host_ptr主机内存中
-     *
-     *  CL_MEM_USE_PERSISTENT_MEM_AMD ???  MALI or Adreno
-     *      clCreateBuffer(context,  CL_MEM_READ_ONLY|CL_MEM_USE_PERSISTENT_MEM_AMD,  sizeof(float)*N,  0, &err);
-     *      clEnqueueMapBuffer
-     *      clEnqueueUnmapMemObject
-     */
     buffer=clCreateBuffer(
             context,
             CL_MEM_READ_ONLY|CL_MEM_COPY_HOST_PTR,  // CL_MEM_READ_ONLY CL_MEM_WRITE_ONLY 是对kernel来说
@@ -197,30 +272,157 @@ void Create_program()
 
 }
 
+/*
+     * https://www.khronos.org/registry/OpenCL/sdk/1.0/docs/man/xhtml/clSetKernelArg.html
+     *
+     * clSetKernalArg会拷贝指向的内容 所以clSetKernalArg返回后可修改arg_value指向的内存 重复使用
+     * 参数使用在每次调用 clEnqueueNDRangeKernel and clEnqueueTask
+     *
+     * 1. arg_value可以指向 内存对象 (buffer or image object) 必须是跟kernel同一上下文
+     * 2. ??如果变量(argument)是内存对象 arg_value可以为NULL 这种情况下 声明为指向__global or __constant memory的指针变量(argument)的值是NULL
+     * 3. 如果变量声明为 __local , arg_value 必须为NULL
+     * 4. 如果变量类型为 sampler_t , arg_value必须指向一个  sampler object.
+     * 5. 其他内核变量  arg_value必须指向实际数据
+     * 6. 如果变量声明为自定义或者内置类型的指针 并用 __global or __constant 修饰/限定，那么内存对象必须是buffer object(非image object)或者NULL
+     *      如果用__constant修饰的变量 指向的  内存对象(buffer object)不能超过 CL_DEVICE_MAX_CONSTANT_BUFFER_SIZE
+     *      __constant修饰的变量数目 不能超过 CL_DEVICE_MAX_CONSTANT_ARGS
+     *
+     *      如果变量类型是 image2d_t/image3d_t  作为参数值的内存对象 必须是 2D image object/3D image object
+     *
+     * 传入kernel的指针参数必须是__global, __constant, 或者__local型的(指向指针的指针不可以作为参数传给kernel函数)
+     *
+     * 内核参数或声明变量 都会有地址空间限定符，地址空间限定符的主要作用是指出数据应该保存在哪个地方
+     * 地址空间限定符有4个:
+     *
+     * __private  只在一个工作项中有效
+     *              如果内核参数或者内核程序中的变量声明没有加限定符,那么他将被保存在私有内存中
+     *              如果'指针变量'没有加限定符，他就会被设置'指向'私有内存,image2d_t和image3d_t型'指针'会一直'指向全局内存'
+     *
+     * __local    保存工作组中工作项的数据
+     *              局部内存在同一个工作组内存是可以共享的
+     *              主机不能读写局部、私有内存。但是主机可以配置局部、私有内存
+     *              只会针对处理内核的各个工作组分配一次 然后在工作组处理结束之后释放内存
+     *              局部内存的访问速度比全局内存更快，因此，最好是
+     *                      先将数据从全局内存读取到局部内存中
+     *                      然后在局部内存中进行处理
+     *                      在工作项处理完局部数据之后，再将结果写到全局内存中，再传输回主机
+     *
+     * __constant  常数内存 只可以读
+     *
+     * __global    保存一个设备中的数据
+     *              一个设备中的各个工作组、各个工作项是可以共享的
+     *              主机与设别之间的数据通信是通过全局内存实现的
+     *              主机和设备都可以读写访问
+     *              当主机应用程序将缓存对象传输给设备，缓存数据是存放在‘全局/常数空间’中
+     *              当主机从设备中读取缓存对象，数据将来自设备的全局内存。
+     *              全局/常数内存往往是一个opencl兼容设备上最大的内存区域 但是访问速度最慢
+     *
+     *  限定符所限定的对象:
+     *      __global:可以限定所有的'内核参数' 内核之中所声明的'指针变量'
+     *      __local: 内核参数 以及 内核中声明的变量  都不能够对其进行'直接初始化' __local float x = 4.0; 报错 -> __local float x; x = 4.0;
+     *      __private:  内核参数 所有'非内涵函数??? inline??'的参数和变量
+     *
+     *  主机'配置' 局部内存__local
+     *      主机与设别之间的数据通信是通过全局内存实现的
+     *      主机'不能读写'局部、私有内存
+     *      主机'可以配置'局部、私有内存
+     *      主机可以告诉'设备'如何为'内核参数分配局部内存'
+     *
+     *
+     *  主机'配置' 私有内存
+     *      私有内存的访问速度最快
+     *      内存空间最小
+     *      '内核参数的私有数据'可以由主机来进行初始化：
+     *          clSetKernelArg 一个参数设定为基本数据类型指针，如int*、float*，char*
+     *                          内核函数中对应的私有内核参数必须是基本数据类型，对应为int、float、char
+     *                          int num_iteration = 4;
+     *                          clSetKernelArg(kernel,0,sizeof(num_iteration),&num_iteration);
+     *                          ...
+     *                          __kernel void proc_data(int num_iteration,...){
+     *                          }
+     *                          该 内核函数参数 没有限定符，因此默认是'私有内存' , 而且’不是一个指针‘
+     *                          那么每一个'工作项'都会有一个'自己的副本'
+     *
+     *  全局/常数数据只能通过'引用传递'(指针??)的方式给内核，而私有数据是'值传递'的方式
+     *
+     *  私有内核参数必须是'基本数据类型'，但是不一定需要是'标量'，也可以是'向量'
+     *                          float nums[4] = {0.0f,1.0f,2.0f,3.0f};
+     *                          clSetKernelArg(kernel,0,sizeof(nums),nums);
+     *                          ...
+     *                          __kernel void proc_data(float4 values,...){ // values不是4个元素的数组 而是float4型向量
+     *                              values[0] <-- 这是错误的
+     *                              values.x values.y values.z values.w <-- 向量访问方式
+     *                          }
+     *
+     *  一般情况下：
+     * clSetKernelArg，指针指向内存对象(cl_mem)，那么对应的内核参数必须是声明为__global或__constant类型的指针。
+     * clSetKernelArg，指针被声明NULL，对应的内核参数必须被声明为__local类型的指针，且主机程序能够做的只是 告诉设备如何为内核参数 分配局部内存
+     * clSetKernelArg，指针指向的是基本数据类型，内核参数就不会是指针，也不需要有任何地址限定符(默认 __private )
+     */
+/*
+    typedef union
+    {
+        cl_float  CL_ALIGNED(16) s[4];
+        #if __CL_HAS_ANON_STRUCT__
+           __CL_ANON_STRUCT__ struct{ cl_float   x, y, z, w; };
+           __CL_ANON_STRUCT__ struct{ cl_float   s0, s1, s2, s3; };
+           __CL_ANON_STRUCT__ struct{ cl_float2  lo, hi; };
+        #endif
+        #if defined( __CL_FLOAT2__)
+            __cl_float2     v2[2];
+        #endif
+        #if defined( __CL_FLOAT4__)
+            __cl_float4     v4;
+        #endif
+    }cl_float4;
+
+    vector的前一半为lo，后一半为hi
+    int4 v = (int4) 7 =(int4)(7,7,7,7)
+    v=(in4)(1,2,3,4)
+    int2 v2=v.lo ->(1,2)  低半部
+         v2=v.hi ->(3,4)
+    v2.v.odd -> (2,4)     偶数项
+ */
 void Set_arg()
 {
-    err=clSetKernelArg(kernel,0,sizeof(cl_mem),&buffer);
-    err=clSetKernelArg(kernel,1,sizeof(cl_mem),&sum_buffer);
-    err=clSetKernelArg(kernel,2,sizeof(int)*NUM_THREAD,NULL);
+    err=clSetKernelArg(kernel,0,sizeof(cl_mem),&buffer);       // __global int *data
+    err=clSetKernelArg(kernel,1,sizeof(cl_mem),&sum_buffer);   // __global int *output
+    err=clSetKernelArg(kernel,2,sizeof(int)*NUM_THREAD ,NULL); // __local int *data_local  __local 声明的参数变量
+    // 要求设备 为 内核参数 分配 局部内存   (如果变量声明为 __local , arg_value 必须为NULL)
+    // 配置 内核参数‘指针变量data_local’ 分配足够保存NUM_THREAD个int的内存空间 并用把指针变量data_local指向这个内存空间
 }
 
 void Execution()
-{   // 一维  维度数 = 1
-    const size_t globalWorkSize[1]={N};         // 工作项 总共 1024
-    const size_t localWorkSize[1]={NUM_THREAD}; // 工作组     128 个工作项  共8个工作组
+{
+    cl_int  errcode_ret = CL_SUCCESS ;
+
+    const size_t globalWorkSize[1]={N};         // 工作项  一维  维度数 = 1 总共 1024
+    const size_t localWorkSize[1]={NUM_THREAD}; // 工作组       128 个工作项  共8个工作组
     // clEnqueueNDRangeKernel 将数据并行的kernel入队并执行
     // 应用程序指明
     // 全局的工作量(global work size，即并行执行这个kernel的工作项(work item)的个数)
     // 局部的工作量(local work size，即一个工作组(work-group)中工作项的个数)
 
-    err=clEnqueueNDRangeKernel(cmdQueue,   // 命令队列
+    errcode_ret = clEnqueueNDRangeKernel(cmdQueue,   // 命令队列
                                kernel,     // 由 clCreateKernel 创建的核心  cl_kernel 与 cl_program 有关联
                                1,          // 维度数量 1,2,3
                                NULL,       // 全局索引 每个维度 开始偏移
                                globalWorkSize,
                                localWorkSize,
                                0,NULL,NULL);
-    clFinish(cmdQueue);
+    if( errcode_ret != CL_SUCCESS ){
+        ALOGE("clEnqueueNDRangeKernel fail with %d" ,  errcode_ret );
+        // CL_INVALID_  cl.h
+
+        // 如果工作组中工作项数目超过 CL_DEVICE_MAX_WORK_ITEM_SIZES(工作组每个维度的工作项数目)  (这里是localWorkSize or NUM_THREAD )
+        // 返回错误 CL_INVALID_WORK_ITEM_SIZE
+        // if the number of work-items specified in any of local_work_size[0], ... local_work_size[work_dim - 1]
+        // is greater than the corresponding values specified by
+        // CL_DEVICE_MAX_WORK_ITEM_SIZES[0], .... CL_DEVICE_MAX_WORK_ITEM_SIZES[work_dim - 1]
+    }
+    errcode_ret = clFinish(cmdQueue);
+    if( errcode_ret != CL_SUCCESS ) ALOGE("clFinish fail with %d" ,  errcode_ret );
+
 }
 
 void CopyOutResult(int*out)
@@ -229,25 +431,32 @@ void CopyOutResult(int*out)
 }
 
 
-
 int  test()
 {
     int* in,*out;
     num_block=N/NUM_THREAD; // 1024  / 128 = 8  这里跟后面clEnqueueNDRangeKernel时候 创建的工作项数量 和 工作组数量一样
+                            // num_block 工作组的数目
     in=(int*)malloc(sizeof(int)*N);             //  输入内存对象          clSetKernelArg
     out=(int*)malloc(sizeof(int)*num_block);    //  输出内存对象                              clEnqueueReadBuffer
     for(int i=0;i<N;i++){
         in[i]=1;
     }
-    Init_OpenCL();
-    Context_cmd();
-    Create_Buffer(in);
-    Create_program();
-    Set_arg();
-    Execution();
-    CopyOutResult(out);
+    Init_OpenCL();      // 获取所有平台和设备信息
+    Context_cmd();      // 建立上下文和命令队列
+    Create_Buffer(in);  // 创建内存对象
+    Create_program();   // 创建程序对象 和 创建内核
+    Set_arg();          // 设置kernel函数参数
+
+    CostHelper c ;
+
+    Execution();        // kernel进入队列
+    CopyOutResult(out); // 拷贝出kernel运行结果
+
+    ALOGD("cost time %" PRId64 " us " , c.Get() ); // 4959 4627 4256 4867 5276 5144
+
+    ALOGD("num_block = %d " , num_block );
     int sum=0;
-    for(int i=0;i<num_block;i++){
+    for(int i=0;i<num_block;i++){ // 所有工作组的结果加起来
         sum+=out[i];
     }
     return sum;
@@ -475,7 +684,7 @@ JNIEXPORT jstring JNICALL Java_com_tom_opencladreon_MainActivity_getDeviceName(J
      */
     // 设备上并行计算单元数目 一个work-group只在一个compute unit上执行
     clGetDeviceInfo(devices[0], CL_DEVICE_MAX_COMPUTE_UNITS,sizeof(maxComputeUnits), &maxComputeUnits, NULL);
-    ALOGD("Parallel compute units: %u\n", maxComputeUnits);
+    ALOGD("并行计算单元: %u\n", maxComputeUnits);
 
     // 工作项 工作组 global和local work-item IDS(索引空间)的最大维度(维度的数目) 该参数最小为3
     // 一个work-item对应硬件上的一个PE（processing element）
@@ -490,46 +699,47 @@ JNIEXPORT jstring JNICALL Java_com_tom_opencladreon_MainActivity_getDeviceName(J
     // 索引空间的维度数量 是可以 1 2 3 维的
     // 处理2D图像或3D空间，work-items和work-groups可以被指定为2或3维
     //
+    cl_uint max_dimensions = 0 ;
+    clGetDeviceInfo(devices[0], CL_DEVICE_MAX_WORK_ITEM_DIMENSIONS,sizeof(max_dimensions), &max_dimensions, NULL);
+    ALOGD("最大维度数目 : %u\n", max_dimensions); // 目前是3   // Return type: cl_uint
 
-    clGetDeviceInfo(devices[0], CL_DEVICE_MAX_WORK_ITEM_DIMENSIONS,sizeof(maxItem), &maxItem, NULL);
-    ALOGD("Max Work Item Dimension : %zd\n", maxItem);
-
-    clGetDeviceInfo(devices[0], CL_DEVICE_MAX_WORK_GROUP_SIZE,sizeof(maxItem), &maxItem, NULL);
-    ALOGD("Max Work Item per Group: %zd (on a single compute unit) \n", maxItem);// 在一个compute unit中执行一个kernel的work-group中work-item的最大数目
+    clGetDeviceInfo(devices[0], CL_DEVICE_MAX_WORK_GROUP_SIZE,sizeof(maxItem), &maxItem, NULL);     // Return type: size_t
+    ALOGD("工作组最大工作项 %zd \n", maxItem);// 在一个compute unit中执行一个kernel的work-group中work-item的最大数目
 
     size_t three[3];
-    clGetDeviceInfo(devices[0], CL_DEVICE_MAX_WORK_ITEM_SIZES,sizeof(three), &three, NULL);
-    ALOGD("Max Work Item Per Group: [%zd,%zd,%zd]\n", three[0],three[1],three[2]);// 在 work-group的每一个维度 声明的 work-item的 最大数目。最小值（1,1,1）
-    // 返回的size_t数目 是根据 CL_DEVICE_MAX_WORK_ITEM_DIMENSIONS 返回的维度数量
+    clGetDeviceInfo(devices[0], CL_DEVICE_MAX_WORK_ITEM_SIZES,sizeof(three), &three, NULL);         // Return type: size_t[]
+    ALOGD("每个工作组各个维度最大大小: [%zd,%zd,%zd]\n", three[0],three[1],three[2]);
+    // 在 work-group的每一个维度 声明的 work-item的 最大数目。最小值（1,1,1）
+    // 返回的 size_t数目 是根据 CL_DEVICE_MAX_WORK_ITEM_DIMENSIONS  返回的维度数量
 
-    // 内存空间  全局和本地
+    //
     clGetDeviceInfo(devices[0], CL_DEVICE_GLOBAL_MEM_SIZE,sizeof(maxGlobalMemSize), &maxGlobalMemSize, NULL);
-    ALOGD("maxGlobalMemSize: %" PRIu64 " (MB)\n", maxGlobalMemSize/1024/1024);
-    clGetDeviceInfo(devices[0], CL_DEVICE_LOCAL_MEM_SIZE,sizeof(maxLocalMemSize), &maxLocalMemSize, NULL);
-    ALOGD("maxLocalMemSize: %" PRIu64 "(KB)\n", maxLocalMemSize/1024);
+    ALOGD("全局内存: %" PRIu64 " (MB)\n", maxGlobalMemSize/1024/1024);
 
-    // 常量空间
+    clGetDeviceInfo(devices[0], CL_DEVICE_LOCAL_MEM_SIZE,sizeof(maxLocalMemSize), &maxLocalMemSize, NULL);
+    ALOGD("局部内存 (一个工作组共享局部内存): %" PRIu64 "(KB)\n", maxLocalMemSize/1024);
+
     clGetDeviceInfo(devices[0], CL_DEVICE_MAX_CONSTANT_BUFFER_SIZE,sizeof(maxConstantBufferSize), &maxConstantBufferSize, NULL);
-    ALOGD("maxConstantBufferSize: %" PRIu64 "(KB)\n", maxConstantBufferSize/1024); // 一个opencl设备的常量空间是有限制的
+    ALOGD("常量空间: %" PRIu64 "(KB)\n", maxConstantBufferSize/1024); // 一个opencl设备的常量空间是有限制的
 
     // 设备支持扩展
     size_t ext_size = 0 ;
-    clGetDeviceInfo(devices[0], CL_DEVICE_EXTENSIONS, 0, NULL, &ext_size); ALOGD("platform extra data max size %zd ", ext_size );
+    clGetDeviceInfo(devices[0], CL_DEVICE_EXTENSIONS, 0, NULL, &ext_size); ALOGD("OpenCL扩展串长度 %zd ", ext_size );
     char* ext_data = (char*)malloc(ext_size);memset(ext_data,0,ext_size );
     clGetDeviceInfo(devices[0], CL_DEVICE_EXTENSIONS, ext_size ,ext_data, NULL);
-    ALOGD("extensions %s" , ext_data );
+    ALOGD("OpenCL扩展 %s" , ext_data );
     free(ext_data);
 
     // Profile版本信息
     clGetDeviceInfo(devices[0], CL_DEVICE_PROFILE, 0, NULL, &valueSize);
     value = (char*) malloc(valueSize);memset(value,0,valueSize );
     clGetDeviceInfo(devices[0], CL_DEVICE_PROFILE , valueSize, value, NULL);
-    ALOGD("profile %s " , value);
+    ALOGD("Profile %s " , value);
     free(value);
     clGetDeviceInfo(devices[0], CL_DEVICE_VERSION, 0, NULL, &valueSize);
     value = (char*) malloc(valueSize); memset(value,0,valueSize );
     clGetDeviceInfo(devices[0], CL_DEVICE_VERSION , valueSize, value, NULL);
-    ALOGD("version %s " , value );
+    ALOGD("Version %s " , value );
     free(value);
 
     // 设备名字
@@ -585,41 +795,41 @@ JNIEXPORT jstring JNICALL Java_com_tom_opencladreon_MainActivity_getDeviceName(J
            Device Name: QUALCOMM Adreno(TM)
 
    6797:
-           platform 0 设备类型 DEFAULT 设备数目 1
-           platform 0 设备类型 CPU 没有找到
-           Current Valid Type GPU
-           platform 0 设备类型 GPU 设备数目 1
-           platform 0 设备类型 ACCELERATOR 没有找到
-           platform 0 device_type 无效值 (CUSTOM)
-           platform 0 设备类型 ALL 设备数目 1
-           Platform's Device Type GPU [4]  Num Of Device [1]
+            platform 0 设备类型 DEFAULT 设备数目 1
+            platform 0 设备类型 CPU 没有找到
+            Current Valid Type GPU
+            platform 0 设备类型 GPU 设备数目 1
+            platform 0 设备类型 ACCELERATOR 没有找到
+            platform 0 device_type 无效值 (CUSTOM)
+            platform 0 设备类型 ALL 设备数目 1
+            Platform's Device Type GPU [4]  Num Of Device [1]
 
-           Parallel compute units: 4
-           Max Work Item Dimension : 545460846595
-           Max Work Item per Group: 256 (on a single compute unit)
-           Max Work Item Per Group: [256,256,256]
-           maxGlobalMemSize: 3823 (MB)
-           maxLocalMemSize: 32(KB)
-           maxConstantBufferSize: 64(KB)
-           platform extra data max size 444
-           extensions
-           cl_khr_global_int32_base_atomics cl_khr_global_int32_extended_atomics
-           cl_khr_local_int32_base_atomics cl_khr_local_int32_extended_atomics
-           cl_khr_byte_addressable_store
-           cl_khr_3d_image_writes
-           cl_khr_fp64
-           cl_khr_int64_base_atomics cl_khr_int64_extended_atomics
-           cl_khr_fp16
-           cl_khr_gl_sharing
-           cl_khr_icd
-           cl_khr_egl_event
-           cl_khr_egl_image                                            --- ???可以跟EGLImageKHR关联 ????
-           cl_arm_core_id
-           cl_arm_printf                                               --- 可以在host打印 ????
-           cl_arm_thread_limit_hint
-           cl_arm_non_uniform_work_group_size
-           cl_arm_import_memory
-           profile FULL_PROFILE
-           version OpenCL 1.1 v1.r7p0-02rel0.f2c69255b7319de8a90fdb262ee294bb
-           Device Name: Mali-T880
+            并行计算单元: 4
+            最大维度数目 : 3
+            工作组最大工作项 256
+            每个工作组各个维度最大大小: [256,256,256]
+            全局内存: 3823 (MB)
+            局部内存 (一个工作组共享局部内存): 32(KB)
+            常量空间: 64(KB)
+            OpenCL扩展串长度 444
+            OpenCL扩展
+                cl_khr_global_int32_base_atomics cl_khr_global_int32_extended_atomics
+                cl_khr_local_int32_base_atomics cl_khr_local_int32_extended_atomics
+                cl_khr_byte_addressable_store
+                cl_khr_3d_image_writes
+                cl_khr_fp64
+                cl_khr_int64_base_atomics cl_khr_int64_extended_atomics
+                cl_khr_fp16
+                cl_khr_gl_sharing
+                cl_khr_icd
+                cl_khr_egl_event
+                cl_khr_egl_image                                            --- ???可以跟EGLImageKHR关联 ????
+                cl_arm_core_id
+                cl_arm_printf                                               --- 可以在host打印 ????
+                cl_arm_thread_limit_hint
+                cl_arm_non_uniform_work_group_size
+                cl_arm_import_memory
+            Profile FULL_PROFILE
+            Version OpenCL 1.1 v1.r7p0-02rel0.f2c69255b7319de8a90fdb262ee294bb
+            Device Name: Mali-T880
 */
