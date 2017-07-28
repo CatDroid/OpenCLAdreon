@@ -38,7 +38,6 @@ public class MainActivity extends BaseActivity {
             }
         });
 
-
         Button btn2 = (Button)findViewById(R.id.btnUMat);
         btn2.setOnClickListener(new View.OnClickListener(){
 
@@ -47,13 +46,16 @@ public class MainActivity extends BaseActivity {
             mClHandler.post(new Runnable() {
                 @Override
                 public void run() {
-                    openCvOclMatMul();
+                    if( ! checkPermissonIfNeed() ){
+                        Log.d(TAG,"check permission first ");
+                        return ;
+                    }else {
+                        openCvOclMatMul();
+                    }
                 }
             } );
             }
         });
-
-
 
         TextView testView1=(TextView)findViewById(R.id.textView1);
         TextView testView2=(TextView)findViewById(R.id.textView2);
@@ -61,6 +63,44 @@ public class MainActivity extends BaseActivity {
         testView1.setText(getPlatformName());
         testView2.setText(getDeviceName());
         testView3.setText(testopencl());
+
+        ((Button)findViewById(R.id.btnCpuSobel)).setOnClickListener(new View.OnClickListener(){
+
+            @Override
+            public void onClick(View v) {
+                mClHandler.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        if( ! checkPermissonIfNeed() ){
+                            Log.d(TAG,"check permission first ");
+                            return ;
+                        }else {
+                            nativecpusobel();
+                        }
+                    }
+                } );
+            }
+        });
+
+
+        ((Button)findViewById(R.id.btnGpuSobel)).setOnClickListener(new View.OnClickListener(){
+
+            @Override
+            public void onClick(View v) {
+                mClHandler.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        if( ! checkPermissonIfNeed() ){
+                            Log.d(TAG,"check permission first ");
+                            return ;
+                        }else {
+                            nativeoclsobel();
+                        }
+                    }
+                } );
+            }
+        });
+
 
     }
 
@@ -76,6 +116,9 @@ public class MainActivity extends BaseActivity {
     public native String getDeviceName();
     public native void testopencvocl();
     public native void openCvOclMatMul();
+
+    public native void nativeoclsobel();
+    public native void nativecpusobel();
 
     public native String stringFromJNI();
 

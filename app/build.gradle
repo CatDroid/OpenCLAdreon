@@ -12,9 +12,10 @@ android {
         testInstrumentationRunner "android.support.test.runner.AndroidJUnitRunner"
         externalNativeBuild {
             cmake {
-                cppFlags "-std=c++11 -frtti -fexceptions"
-                arguments   "-DOpenCV_DIR=E:\\temp\\opencv-3.2.0-rc\\build\\OpenCV-android-sdk\\sdk\\native\\jni"
-                            "-DOPENCL_VENDOR=Dragon"  // Dragon:高通  MTK:MTK
+                cppFlags "-std=c++11","-frtti","-fexceptions"
+                arguments   "-DOpenCV_DIR=E:\\temp\\opencv-3.2.0-rc\\build\\OpenCV-android-sdk\\sdk\\native\\jni",
+                            "-DOPENCL_VENDOR=MTK" // Dragon:高通  MTK:MTK
+
             }
         }
 

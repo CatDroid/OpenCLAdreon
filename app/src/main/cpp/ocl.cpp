@@ -224,20 +224,7 @@ void Context_cmd()
     if(errcode_ret != CL_SUCCESS) ALOGE("clCreateCommandQueue fail");
 }
 
-/*
- * clCreateBuffer
- *
- *  CL_MEM_USE_HOST_PTR
- *      刚开始buffer object的值是来自于host_ptr
- *      但buffer object处理之后,写回到host_ptr主机内存中
- *  CL_MEM_COPY_HOST_PTR
- *      buffer object的初始值使用host_ptr
- *      buffer object操作完成后的值也不会写回到host_ptr主机内存中
- *  CL_MEM_USE_PERSISTENT_MEM_AMD ???  MALI or Adreno
- *      clCreateBuffer(context,  CL_MEM_READ_ONLY|CL_MEM_USE_PERSISTENT_MEM_AMD,  sizeof(float)*N,  0, &err);
- *      clEnqueueMapBuffer
- *      clEnqueueUnmapMemObject
- */
+
 void Create_Buffer(int *data)
 {
     buffer=clCreateBuffer(
@@ -256,14 +243,13 @@ void Create_program()
 {
     cl_int  errcode_ret = CL_SUCCESS ;
 
-    // 根据字符串/源码 创建Program
-    // CL_BUILD_PROGRAM_FAILURE
-    program = clCreateProgramWithSource(context, LEN(src), src, NULL, &errcode_ret);
-    if( errcode_ret != CL_SUCCESS ) ALOGE("clCreateProgramWithSource fail ");
+
+    program = clCreateProgramWithSource(context, LEN(src) /*1*/, src, NULL, &errcode_ret);
+    if( errcode_ret != CL_SUCCESS ) ALOGE("clCreateProgramWithSource fail with %d " , errcode_ret );
 
     // 编译Program成二进制 from the program source or binary
-    err = clBuildProgram(program, num_device, devices, NULL, NULL, NULL );
-    if( err != CL_SUCCESS ) ALOGE("clCreateProgramWithSource fail with %d " , err );
+    errcode_ret = clBuildProgram(program, num_device, devices, NULL, NULL, NULL );
+    if( errcode_ret != CL_SUCCESS ) ALOGE("clCreateProgramWithSource fail with %d " , errcode_ret );
 
     // 创建kernel对象  program必须已经编译   "reduction"必须在program中以__kernel修饰
     // #define CL_INVALID_PROGRAM_EXECUTABLE               -45 没有成功编译program
@@ -272,117 +258,7 @@ void Create_program()
 
 }
 
-/*
-     * https://www.khronos.org/registry/OpenCL/sdk/1.0/docs/man/xhtml/clSetKernelArg.html
-     *
-     * clSetKernalArg会拷贝指向的内容 所以clSetKernalArg返回后可修改arg_value指向的内存 重复使用
-     * 参数使用在每次调用 clEnqueueNDRangeKernel and clEnqueueTask
-     *
-     * 1. arg_value可以指向 内存对象 (buffer or image object) 必须是跟kernel同一上下文
-     * 2. ??如果变量(argument)是内存对象 arg_value可以为NULL 这种情况下 声明为指向__global or __constant memory的指针变量(argument)的值是NULL
-     * 3. 如果变量声明为 __local , arg_value 必须为NULL
-     * 4. 如果变量类型为 sampler_t , arg_value必须指向一个  sampler object.
-     * 5. 其他内核变量  arg_value必须指向实际数据
-     * 6. 如果变量声明为自定义或者内置类型的指针 并用 __global or __constant 修饰/限定，那么内存对象必须是buffer object(非image object)或者NULL
-     *      如果用__constant修饰的变量 指向的  内存对象(buffer object)不能超过 CL_DEVICE_MAX_CONSTANT_BUFFER_SIZE
-     *      __constant修饰的变量数目 不能超过 CL_DEVICE_MAX_CONSTANT_ARGS
-     *
-     *      如果变量类型是 image2d_t/image3d_t  作为参数值的内存对象 必须是 2D image object/3D image object
-     *
-     * 传入kernel的指针参数必须是__global, __constant, 或者__local型的(指向指针的指针不可以作为参数传给kernel函数)
-     *
-     * 内核参数或声明变量 都会有地址空间限定符，地址空间限定符的主要作用是指出数据应该保存在哪个地方
-     * 地址空间限定符有4个:
-     *
-     * __private  只在一个工作项中有效
-     *              如果内核参数或者内核程序中的变量声明没有加限定符,那么他将被保存在私有内存中
-     *              如果'指针变量'没有加限定符，他就会被设置'指向'私有内存,image2d_t和image3d_t型'指针'会一直'指向全局内存'
-     *
-     * __local    保存工作组中工作项的数据
-     *              局部内存在同一个工作组内存是可以共享的
-     *              主机不能读写局部、私有内存。但是主机可以配置局部、私有内存
-     *              只会针对处理内核的各个工作组分配一次 然后在工作组处理结束之后释放内存
-     *              局部内存的访问速度比全局内存更快，因此，最好是
-     *                      先将数据从全局内存读取到局部内存中
-     *                      然后在局部内存中进行处理
-     *                      在工作项处理完局部数据之后，再将结果写到全局内存中，再传输回主机
-     *
-     * __constant  常数内存 只可以读
-     *
-     * __global    保存一个设备中的数据
-     *              一个设备中的各个工作组、各个工作项是可以共享的
-     *              主机与设别之间的数据通信是通过全局内存实现的
-     *              主机和设备都可以读写访问
-     *              当主机应用程序将缓存对象传输给设备，缓存数据是存放在‘全局/常数空间’中
-     *              当主机从设备中读取缓存对象，数据将来自设备的全局内存。
-     *              全局/常数内存往往是一个opencl兼容设备上最大的内存区域 但是访问速度最慢
-     *
-     *  限定符所限定的对象:
-     *      __global:可以限定所有的'内核参数' 内核之中所声明的'指针变量'
-     *      __local: 内核参数 以及 内核中声明的变量  都不能够对其进行'直接初始化' __local float x = 4.0; 报错 -> __local float x; x = 4.0;
-     *      __private:  内核参数 所有'非内涵函数??? inline??'的参数和变量
-     *
-     *  主机'配置' 局部内存__local
-     *      主机与设别之间的数据通信是通过全局内存实现的
-     *      主机'不能读写'局部、私有内存
-     *      主机'可以配置'局部、私有内存
-     *      主机可以告诉'设备'如何为'内核参数分配局部内存'
-     *
-     *
-     *  主机'配置' 私有内存
-     *      私有内存的访问速度最快
-     *      内存空间最小
-     *      '内核参数的私有数据'可以由主机来进行初始化：
-     *          clSetKernelArg 一个参数设定为基本数据类型指针，如int*、float*，char*
-     *                          内核函数中对应的私有内核参数必须是基本数据类型，对应为int、float、char
-     *                          int num_iteration = 4;
-     *                          clSetKernelArg(kernel,0,sizeof(num_iteration),&num_iteration);
-     *                          ...
-     *                          __kernel void proc_data(int num_iteration,...){
-     *                          }
-     *                          该 内核函数参数 没有限定符，因此默认是'私有内存' , 而且’不是一个指针‘
-     *                          那么每一个'工作项'都会有一个'自己的副本'
-     *
-     *  全局/常数数据只能通过'引用传递'(指针??)的方式给内核，而私有数据是'值传递'的方式
-     *
-     *  私有内核参数必须是'基本数据类型'，但是不一定需要是'标量'，也可以是'向量'
-     *                          float nums[4] = {0.0f,1.0f,2.0f,3.0f};
-     *                          clSetKernelArg(kernel,0,sizeof(nums),nums);
-     *                          ...
-     *                          __kernel void proc_data(float4 values,...){ // values不是4个元素的数组 而是float4型向量
-     *                              values[0] <-- 这是错误的
-     *                              values.x values.y values.z values.w <-- 向量访问方式
-     *                          }
-     *
-     *  一般情况下：
-     * clSetKernelArg，指针指向内存对象(cl_mem)，那么对应的内核参数必须是声明为__global或__constant类型的指针。
-     * clSetKernelArg，指针被声明NULL，对应的内核参数必须被声明为__local类型的指针，且主机程序能够做的只是 告诉设备如何为内核参数 分配局部内存
-     * clSetKernelArg，指针指向的是基本数据类型，内核参数就不会是指针，也不需要有任何地址限定符(默认 __private )
-     */
-/*
-    typedef union
-    {
-        cl_float  CL_ALIGNED(16) s[4];
-        #if __CL_HAS_ANON_STRUCT__
-           __CL_ANON_STRUCT__ struct{ cl_float   x, y, z, w; };
-           __CL_ANON_STRUCT__ struct{ cl_float   s0, s1, s2, s3; };
-           __CL_ANON_STRUCT__ struct{ cl_float2  lo, hi; };
-        #endif
-        #if defined( __CL_FLOAT2__)
-            __cl_float2     v2[2];
-        #endif
-        #if defined( __CL_FLOAT4__)
-            __cl_float4     v4;
-        #endif
-    }cl_float4;
 
-    vector的前一半为lo，后一半为hi
-    int4 v = (int4) 7 =(int4)(7,7,7,7)
-    v=(in4)(1,2,3,4)
-    int2 v2=v.lo ->(1,2)  低半部
-         v2=v.hi ->(3,4)
-    v2.v.odd -> (2,4)     偶数项
- */
 void Set_arg()
 {
     err=clSetKernelArg(kernel,0,sizeof(cl_mem),&buffer);       // __global int *data

@@ -34,6 +34,8 @@ add_library(native-lib
              src/main/cpp/native-lib.cpp
              src/main/cpp/ocl.cpp
              src/main/cpp/opencv_ocl.cpp
+             src/main/cpp/jni_sobel.cpp
+             src/main/cpp/MySobel.cpp
              )
 
 find_library(
