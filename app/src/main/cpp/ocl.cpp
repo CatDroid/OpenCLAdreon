@@ -588,7 +588,22 @@ JNIEXPORT jstring JNICALL Java_com_tom_opencladreon_MainActivity_getDeviceName(J
     // 在 work-group的每一个维度 声明的 work-item的 最大数目。最小值（1,1,1）
     // 返回的 size_t数目 是根据 CL_DEVICE_MAX_WORK_ITEM_DIMENSIONS  返回的维度数量
 
-    //
+
+    cl_device_fp_config fp_config;
+    clGetDeviceInfo(devices[0], CL_DEVICE_SINGLE_FP_CONFIG ,sizeof(cl_device_fp_config), &fp_config ,NULL );
+    ALOGD("设备单精度浮点数能力  0x%x\n" , fp_config ); //   6797 0x3f   820 0x16
+    /*
+
+        #define CL_FP_DENORM                                (1 << 0)
+        #define CL_FP_INF_NAN                               (1 << 1) // < 820
+        #define CL_FP_ROUND_TO_NEAREST                      (1 << 2) // < 820
+        #define CL_FP_ROUND_TO_ZERO                         (1 << 3)
+        #define CL_FP_ROUND_TO_INF                          (1 << 4) // < 820
+        #define CL_FP_FMA                                   (1 << 5)
+        #define CL_FP_SOFT_FLOAT                            (1 << 6)
+        #define CL_FP_CORRECTLY_ROUNDED_DIVIDE_SQRT         (1 << 7)
+     */
+
     clGetDeviceInfo(devices[0], CL_DEVICE_GLOBAL_MEM_SIZE,sizeof(maxGlobalMemSize), &maxGlobalMemSize, NULL);
     ALOGD("全局内存: %" PRIu64 " (MB)\n", maxGlobalMemSize/1024/1024);
 

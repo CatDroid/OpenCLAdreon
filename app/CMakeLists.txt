@@ -19,6 +19,13 @@ elseif( OPENCL_VENDOR MATCHES MTK )         #MTK MT6797
     link_directories( MTK/libs/${ANDROID_ABI}/ )
     set(CMAKE_C_FLAGS "-DUSING_MTK=1  ${CMAKE_C_FLAGS}")
     set(CMAKE_CXX_FLAGS "-DUSING_MTK=1  ${CMAKE_CXX_FLAGS}")
+
+if( ANDROID_ABI MATCHES arm64-v8a )
+    SET(CMAKE_INSTALL_RPATH  /system/lib64/egl/  )
+else()
+    SET(CMAKE_INSTALL_RPATH  /system/lib/egl/  )
+endif()
+
 else()                                      #默认 高通平台
 
     include_directories(Adreon/include)

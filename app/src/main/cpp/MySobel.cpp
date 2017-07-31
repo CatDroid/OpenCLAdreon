@@ -2,6 +2,7 @@
 // Created by hl.he  on 2017/7/26.
 //
 
+#include <fcntl.h>
 #include "MySobel.h"
 
 #define LOG_TAG "MySobel"
@@ -16,42 +17,67 @@
 // error: use of type 'double' requires cl_khr_fp64 extension to be enabled
 // "#pragma OPENCL EXTENSION cl_khr_fp64 : enable\n"
 
+//     "#pragma OPENCL EXTENSION cl_khr_select_fprounding_mode : enable\n"\
+//    "#pragma OPENCL SELECT_ROUNDING_MODE rtn\n"\
+
+/*
+ *     "#ifdef cl_khr_fp64\n"\
+        "#pragma OPENCL EXTENSION cl_khr_fp64 : enable\n"\
+        "#endif\n"\
+ */
+
+// 往下 x正方向
+// 往右 y正方向
 #define  KERNEL_SRC "\n"\
     "#ifndef SOBEL_VALUE \n"\
     "#define SOBEL_VALUE 20 \n"\
     "#endif \n"\
-	"__kernel void Sobel(__global unsigned char *array1, __global char *array2, __global int *array3)\n "\
+	"__kernel void Sobel(__global uchar *array1, __global uchar *array2, __global int *array3)\n "\
 	"{\n "\
 	"   size_t gidx = get_global_id(0);\n"\
 	"   size_t gidy = get_global_id(1);\n"\
-	"   unsigned char a00, a01, a02;\n"\
-	"   unsigned char a10, a11, a12;\n"\
-	"   unsigned char a20, a21, a22;\n"\
+	"   uchar a00, a01, a02;\n"\
+	"   uchar a10, a11, a12;\n"\
+	"   uchar a20, a21, a22;\n"\
 	"   int width=array3[0];\n"\
 	"   int heigh=array3[1];\n"\
 	"   int widthStep=array3[2];\n"\
 	"	if(gidy>0&&gidy<heigh-1&&gidx>0&&gidx<width-1)\n"\
 	"   {\n"\
-	"       a00=array1[gidx-1+widthStep*(gidy-1)];\n"\
-	"       a01=array1[gidx+widthStep*(gidy-1)];\n"\
-	"       a02=array1[gidx+1+widthStep*(gidy-1)];\n "\
-	"       a10=array1[gidx-1+widthStep*gidy];\n"\
-	"       a11=array1[gidx+widthStep*gidy];\n"\
-	"       a12=array1[gidx+1+widthStep*gidy];\n"\
-	"       a20=array1[gidx-1+widthStep*(gidy+1)];\n"\
-	"		a21=array1[gidx+widthStep*(gidy+1)];\n"\
-	"		a22=array1[gidx+1+widthStep*(gidy+1)];\n"\
-	"		float ux=a20+2*a21+a22-a00-2*a01-a02;\n"\
-	"		float uy=a02+2*a12+a22-a00-2*a10-a20;\n"\
+	"       a00=  array1[gidx-1   +  widthStep * (gidy-1)] ;\n"\
+	"       a01=  array1[gidx     +  widthStep * (gidy-1)] ;\n"\
+	"       a02=  array1[gidx+1   +  widthStep * (gidy-1)] ;\n "\
+	"       a10=  array1[gidx-1   +  widthStep * gidy ]    ;\n"\
+	"       a11=  array1[gidx     +  widthStep * gidy ]    ;\n"\
+	"       a12=  array1[gidx+1   + widthStep * gidy]      ;\n"\
+	"       a20=  array1[gidx-1   + widthStep * (gidy+1)]  ;\n"\
+	"		a21=  array1[gidx     + widthStep * (gidy+1)]  ;\n"\
+	"		a22=  array1[gidx+1   + widthStep * (gidy+1)]  ;\n"\
+	"		float ux=  a20 + 2*a21 +a22 -a00 -2*a01 -a02 ;\n"\
+	"		float uy=  a02 + 2*a12 +a22 -a00 -2*a10 -a20;\n"\
 	"		float u=sqrt( ux * ux + uy * uy );\n"\
-	"		if( u > 255) {\n"\
-	"           u = -1 ;\n"\
+    "		if( u > 255) {\n"\
+	"           u = 255 ;\n"\
 	"		} else if ( u < SOBEL_VALUE ) {\n"\
 	"           u = 0;\n"\
 	"		}\n"\
-	"		array2[gidx+widthStep*gidy]=u;\n"\
+	"		array2[gidx+widthStep*gidy] =  u ;\n"\
 	"	}\n"\
 "}"
+// a11 是无用的
+
+/*
+ * 对于MTK Mali 平台 char array2[gidx+widthStep*gidy] = convert_char(u)  还是
+ * char array2[gidx+widthStep*gidy] =  u  只要是从float -> char 都会出现 > 127 的数被压制到 127 0x0111 1111
+ *      MTK平台 当浮点数是 float  160 209 176 164 169 141 130 超过127的  => char 都是 127
+ *
+ *      但是如果是 float -> uchar     float 160.0f -> uchar 160
+ *
+ * 对于高通平台
+ *      float  160/209/130  -->  char 160/209/130
+ *
+ * MTK和高通都对 浮点数float -1  =>  char 255
+ */
 
 
 void MySobel::findPlatformAndDevices()
@@ -117,7 +143,7 @@ void MySobel::findPlatformAndDevices()
  *
  *  note:   1. 上下文Context 对应 一个平台的多个设备     命令队列是针对一个Context的一个设备
  *          2. clCreateContextFromType  可以在某一个平台上 所有同类设备上 创建上下文 CL_DEVICE_TYPE_GPU/CL_DEVICE_TYPE_CPU  不用指定具体设备
- *          3. 如果是顺序执行  clEnqueueNDRangeKernel执行Kernel A 然后clEnqueueNDRangeKernel指向Kernel B
+ *          3. 如果是顺序执行  clEnqueueNDRangeKernel 执行Kernel A 然后clEnqueueNDRangeKernel指向Kernel B
  *                           应用可以认为A先执行完再执行B 如果B的输入cl_mem是A的输出cl_mem 那么B可以见到A输出的正确的数据
  *             如果是乱序执行   为了保证顺序 对于执行B 可以在调用clEnqueueNDRangeKernel 使用event_wait_list
  *                          事件的等待(a wait)或者栅栏(a barrier)命令 可以加入命令队列
@@ -223,22 +249,10 @@ void MySobel::createProgramAndKernel(){
     if(status != CL_SUCCESS) {
         char info_buf[1024];
         clGetProgramBuildInfo(mProgram, mDevice, CL_PROGRAM_BUILD_LOG, 1024, info_buf, NULL);
-        ALOGE("clBuildProgram fail with %d info %s " , status , info_buf );
+        ALOGE("clBuildProgram fail with %d info %s " , status , info_buf ); // 可以打印编译错误在哪里
         assert( status == CL_SUCCESS );
     }
-/*
-    if (err != CL_SUCCESS)
-    {
-      fprintf(stderr, "clBuild failed:%d\n", err);
 
-      fprintf(stderr, "\n%s\n", info_buf);
-      exit(1);
-    }
-    else{
-      clGetProgramBuildInfo(program, device_id, CL_PROGRAM_BUILD_LOG, MAX_INFO_SIZE, info_buf, NULL);
-      printf("Kernel Build Success\n%s\n", info_buf);
-    }
- */
     mKernel = clCreateKernel(mProgram, "Sobel", &status);
     if(status != CL_SUCCESS) {
         ALOGE("clCreateKernel fail with %d " , status );
@@ -498,13 +512,45 @@ void MySobel::runKernel() {
         )
  */
 void MySobel::getKernelResult( uint8_t* output /*allocated by caller */){
+
+//    cl_uchar sqrt_float[ mImageHeight * mImageWidth ] ;
+//    memset( sqrt_float, 0  , mImageHeight * mImageWidth * sizeof(cl_uchar) );
+//    ALOGD("sizeof(cl_uchar) = %zd " , sizeof(cl_uchar) );  // sizeof(cl_float) = 4  sizeof(cl_uchar) = 1
+//    clEnqueueReadBuffer(mCmdQueue,
+//                        mOutImgMem,
+//                        CL_TRUE,// block
+//                        0,
+//                        mImageHeight * mImageWidth * sizeof(cl_uchar)/*each pixel 1 byte: gray uint8_t*/,
+//                        sqrt_float , 0,
+//                        NULL, NULL);
+
     clEnqueueReadBuffer(mCmdQueue,
                         mOutImgMem,
                         CL_TRUE,// block
                         0,
-                        mImageHeight * mImageWidth * 1/*each pixel 1 byte: gray uint8_t*/,
-                        output, 0,
+                        mImageHeight * mImageWidth * sizeof(cl_uchar)/*each pixel 1 byte: gray uint8_t*/,
+                        output , 0,
                         NULL, NULL);
+
+
+//    ALOGD("write dump begin ");
+//    FILE * fp = fopen("/mnt/sdcard/gpu_strict.txt", "w+" );
+//    for( int i = 0 ; i < mImageHeight ; i++  ){
+//        for( int j = 0 ; j < mImageWidth ; j+=4 ){ // 图片宽要是4的倍数
+//            fprintf(fp, "%4u %4u %4u %4u "
+//                    "\n"// for beyond compare
+//                    ,
+//                    sqrt_float[i*mImageWidth + j ],
+//                    sqrt_float[i*mImageWidth + j + 1 ],
+//                    sqrt_float[i*mImageWidth + j + 2 ],
+//                    sqrt_float[i*mImageWidth + j + 3 ]
+//                    );
+//
+//        }
+//        fprintf(fp,"\n");
+//    }
+//    fclose(fp);
+//    ALOGD("write dump done ");
 }
 
 /*
@@ -591,6 +637,25 @@ bool MySobel::doSobel(uint8_t* in /*gray CV_8UC1 */, uint8_t* out /*allocate by 
     mImageWidth = width ;
     mImageHeight = height ;
     mImageStride = stride ;
+
+//    ALOGD("write dump begin ");
+//    FILE * fp = fopen("/mnt/sdcard/gpu_gray_byte.txt", "w+" );
+//    for( int i = 0 ; i < mImageHeight ; i++  ){
+//        for( int j = 0 ; j < mImageWidth ; j+= 4 ){ // 图片宽要是4的倍数
+//            fprintf(fp, "%4u %4u %4u %4u " ,
+//                    in[i*mImageWidth + j ],
+//                    in[i*mImageWidth + j + 1 ],
+//                    in[i*mImageWidth + j + 2 ],
+//                    in[i*mImageWidth + j + 3 ]
+//            );
+//        }
+//        fprintf(fp,"\n");
+//    }
+//    fclose(fp);
+//    ALOGD("write dump done ");
+
+//    double result = sqrt(18*18 + 2*2)=sqrt(652)   sqrt(28*28 + 6*6 )=sqrt(4740)
+//    ALOGD("sqrt result = %f " , result );
 
     ALOGD("width = %u height = %u stride = %u" , width , height , stride );
 
