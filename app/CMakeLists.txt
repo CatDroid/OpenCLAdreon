@@ -43,11 +43,19 @@ add_library(native-lib
              src/main/cpp/opencv_ocl.cpp
              src/main/cpp/jni_sobel.cpp
              src/main/cpp/MySobel.cpp
+             src/main/cpp/jni_bilateral.cpp
+             src/main/cpp/MyCpuBilateral.cpp
+             src/main/cpp/MyOclBilateral.cpp
              )
 
 find_library(
               log-lib
               log )
+
+find_library(
+            graphics-lib
+            jnigraphics )
+
 
 if( OPENCL_VENDOR MATCHES Dragon )
     set(log-lib ${log-lib} libOpenCL.so )
@@ -73,4 +81,5 @@ include_directories(${OpenCV_INCLUDE_DIRS})
 target_link_libraries( # Specifies the target library.
                        native-lib
                        ${log-lib}
+                       ${graphics-lib}
                        ${OpenCV_LIBS} )

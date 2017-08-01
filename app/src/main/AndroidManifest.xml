@@ -22,6 +22,16 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <activity
+            android:name=".BilateralActivity"
+            android:label="双边滤波" >
+            <intent-filter>
+                <action android:name="android.intent.action.BilateralActivity" />
+                <category android:name="android.intent.category.BilateralActivity" />
+            </intent-filter>
+        </activity>
+
     </application>
 
 </manifest>

@@ -26,6 +26,14 @@
         "#endif\n"\
  */
 
+/*
+ *  标量类型  Kernel 与 API
+ *  Type in OpenCL Language         API type for application
+ *  char                            cl_char
+ *  short                           cl_short
+ *  https://www.khronos.org/registry/OpenCL/sdk/1.0/docs/man/xhtml/scalarDataTypes.html
+ *
+ */
 // 往下 x正方向
 // 往右 y正方向
 #define  KERNEL_SRC "\n"\
