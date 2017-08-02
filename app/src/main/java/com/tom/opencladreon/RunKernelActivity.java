@@ -63,21 +63,23 @@ public class RunKernelActivity extends BaseActivity {
         ((Button)findViewById(R.id.btnGEMM)).setOnClickListener(new View.OnClickListener(){
             @Override
             public void onClick(final View v) {
-                v.setEnabled(false);
-                mClHandler.post(new Runnable() {
-                    @Override
-                    public void run() {
-                        copyFile("sgemm.cl");
-                        boolean done = nativeRunSGEMM();
-                        toastMessage( done?"Done":"Fail" );
-                        mMsgHandler.post(new Runnable() {
-                            @Override
-                            public void run() {
-                                v.setEnabled(true);
-                            }
-                        });
-                    }
-                } );
+                if( checkPermissonIfNeed() ){
+                    v.setEnabled(false);
+                    mClHandler.post(new Runnable() {
+                        @Override
+                        public void run() {
+                            copyFile("sgemm.cl");
+                            boolean done = nativeRunSGEMM();
+                            toastMessage( done?"Done":"Fail" );
+                            mMsgHandler.post(new Runnable() {
+                                @Override
+                                public void run() {
+                                    v.setEnabled(true);
+                                }
+                            });
+                        }
+                    } );
+                }
             }
         });
     }

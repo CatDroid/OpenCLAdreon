@@ -33,6 +33,7 @@ void sgemmInitialize (int matrixOrder, float* matrixA, float* matrixB, float * m
     }
 }
 
+#define DUMP_TO_FILE 0
 
 /**
  * \brief Simple SGEMM OpenCL sample.
@@ -84,7 +85,7 @@ bool Java_com_tom_opencladreon_RunKernelActivity_nativeRunSGEMM(JNIEnv* env, jcl
     }
 
     // kernel的参数
-    unsigned int matrixOrder = 16;
+    unsigned int matrixOrder = 16 ;
     float alpha = 1;
     float beta = 0.1;
 
@@ -126,6 +127,43 @@ bool Java_com_tom_opencladreon_RunKernelActivity_nativeRunSGEMM(JNIEnv* env, jcl
 
     /* Fill the matrices with random data. */
     sgemmInitialize(matrixOrder, matrixA, matrixB, matrixC);
+
+#if DUMP_TO_FILE == 1
+
+    FILE* fp = fopen("/mnt/sdcard/sgemm.txt","w+");
+    for(int i = 0 ; i <  matrixOrder ; i++ ){
+        for(int j = 0 ; j <  matrixOrder ; j+=4 ) {
+            fprintf(fp, "%10f,%10f,%10f,%10f," ,
+                      matrixA[i*matrixOrder + j ],  matrixA[i*matrixOrder + j + 1  ],
+                      matrixA[i*matrixOrder + j + 2 ],  matrixA[i*matrixOrder + j + 3  ] );
+        }
+        fseek(fp,-1,SEEK_CUR); // clear ,
+        fprintf(fp,";\n");
+    }
+    fprintf(fp,"\n");
+    for(int i = 0 ; i <  matrixOrder ; i++ ){
+        for(int j = 0 ; j <  matrixOrder ; j+=4 ) {
+            fprintf(fp, "%10f,%10f,%10f,%10f," ,
+                    matrixB[i*matrixOrder + j ],  matrixB[i*matrixOrder + j + 1  ],
+                    matrixB[i*matrixOrder + j + 2 ],  matrixB[i*matrixOrder + j + 3 ] );
+        }
+        fseek(fp,-1,SEEK_CUR); // clear ,
+        fprintf(fp,";\n");
+    }
+
+    fprintf(fp,"\n");
+    for(int i = 0 ; i <  matrixOrder ; i++ ){
+        for(int j = 0 ; j <  matrixOrder ; j+=4 ) {
+            fprintf(fp, "%10f,%10f,%10f,%10f," ,
+                    matrixC[i*matrixOrder + j ],  matrixC[i*matrixOrder + j + 1  ],
+                    matrixC[i*matrixOrder + j + 2 ],  matrixC[i*matrixOrder + j + 3 ] );
+        }
+        fseek(fp,-1,SEEK_CUR); // clear ,
+        fprintf(fp,";\n");
+    }
+
+#endif
+
 
     /* Unmap the memory so we can pass it to the kernel. */
     bool unmapMemoryObjectsSuccess = true;
@@ -205,6 +243,19 @@ bool Java_com_tom_opencladreon_RunKernelActivity_nativeRunSGEMM(JNIEnv* env, jcl
     }
 
     /* Do something with the output (matrixC) here.  matrixC保存结果 可以在这里打印 */
+#if DUMP_TO_FILE == 1
+    fprintf(fp,"\n");
+    for(int i = 0 ; i <  matrixOrder ; i++ ){
+        for(int j = 0 ; j <  matrixOrder ; j+=4 ) {
+            fprintf(fp, "%10f,%10f,%10f,%10f," ,
+                    matrixC[i*matrixOrder + j ],  matrixC[i*matrixOrder + j + 1 ],
+                    matrixC[i*matrixOrder + j + 2 ],  matrixC[i*matrixOrder + j + 3 ] );
+        }
+        fseek(fp,-1,SEEK_CUR); // clear ,
+        fprintf(fp,";\n");
+    }
+    fclose(fp);
+#endif
 
     /* Unmap the output. */
     if (!checkSuccess(clEnqueueUnmapMemObject(commandQueue, memoryObjects[2], matrixC, 0, NULL, NULL)))
