@@ -60,7 +60,7 @@ public class BilateralActivity extends Activity {
 		InputStream in;
 		try {
 			in = getAssets().open(f);
-			final File of = new File(getDir("execdir",MODE_PRIVATE), f);
+			final File of = new File(getDir("opencl_dir",MODE_PRIVATE), f);
 			
 			final OutputStream out = new FileOutputStream(of);
 

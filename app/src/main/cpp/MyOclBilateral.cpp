@@ -115,7 +115,7 @@ void openCLNR (unsigned char* bufIn, unsigned char* bufOut, int* info)
 		std::vector<cl::Device> devices = context.getInfo<CL_CONTEXT_DEVICES>();
 		cl::CommandQueue queue(context, devices[0], 0, &err);
 
-		std::string kernelSource = loadProgram("/data/data/com.tom.opencladreon/app_execdir/bilateralKernel.cl");
+		std::string kernelSource = loadProgram("/data/data/com.tom.opencladreon/app_opencl_dir/bilateralKernel.cl");
 
 		cl::Program::Sources source(1, std::make_pair(kernelSource.c_str(), kernelSource.length()+1));
 		cl::Program program(context, source);

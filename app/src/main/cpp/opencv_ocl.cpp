@@ -26,7 +26,7 @@ using namespace cv;
 #define ALOGD(...) __android_log_print(ANDROID_LOG_DEBUG, LOG_TAG, __VA_ARGS__)
 #define ALOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
-#define USING_OPENCL 0
+#define USING_OPENCL 1
 
 extern "C"
 JNIEXPORT void JNICALL Java_com_tom_opencladreon_MainActivity_testopencvocl (JNIEnv * env, jobject thisobject)
@@ -118,20 +118,48 @@ JNIEXPORT void JNICALL Java_com_tom_opencladreon_MainActivity_openCvOclMatMul(JN
     // CV_Assert( type == B.type() && (type == CV_32FC1 || type == CV_64FC1 || type == CV_32FC2 || type == CV_64FC2) );
     int64_t after = cv::getTickCount() ;
     double  duration  =  (after - before)/cv::getTickFrequency();
-    ALOGD("Cost => %f s ", duration );
+    ALOGD("using Cpu Cost => %f s ", duration );
 
-    ocl::setUseOpenCL(true);
 
-    //UMat umatA = floatA.getUMat( cv::ACCESS_READ);
-    //UMat umatB = floatB.getUMat( cv::ACCESS_READ);
+//    {
+//        ocl::setUseOpenCL(true);
+//        ALOGD("useOpenCL to Multiply Mat  ? %s " , ocl::useOpenCL()?"true":"false");
+////    UMat umatA = floatA.getUMat( cv::ACCESS_READ);
+////    UMat umatB = floatB.getUMat( cv::ACCESS_READ);
+//
+//        int64_t before_u = cv::getTickCount() ;
+//        loop = 10 ;
+//        while(loop--){
+//            UMat umatC ; // 只要求返回值是 UMat  但是里面实现会对 Mat A Mat B  getUMat
+//            cv::gemm( floatA, floatB, 1, cv::noArray() , 1, umatC , 0 );
+//        }
+//        int64_t after_u = cv::getTickCount() ;
+//        double  duration_u  =  (after_u - before_u)/cv::getTickFrequency();
+//        ALOGD("using OpenCl Cost => %f s ", duration_u );
+//    }
 
-    int64_t before_u = cv::getTickCount() ;
-    loop = 10 ;
-    while(loop--){
-        UMat umatC ;
-        cv::gemm( floatA, floatB, 1, cv::noArray() , 1, umatC , 0 );
+    {
+        int64_t before_u = cv::getTickCount() ;
+        Mat simpleA (16, 16, CV_32F);
+        for(int i = 0; i < simpleA.rows; i++)
+            for(int j = 0; j < simpleA.cols; j++)
+                simpleA.at<float>(i,j)= i * simpleA.rows + j ;
+
+        Mat simpleB (16, 16, CV_32F);
+        for(int i = 0; i < simpleB.rows; i++)
+            for(int j = 0; j < simpleB.cols; j++)
+                simpleB.at<float>(i,j)= i * simpleB.rows + j ;
+
+        loop = 10 ;
+        while(loop--){
+            UMat umatC ; // 只要求返回值是 UMat  但是里面实现会对 Mat A Mat B  getUMat
+            cv::gemm( simpleA, simpleB, 1, cv::noArray() , 1, umatC , 0 );
+        }
+
+        int64_t after_u = cv::getTickCount() ;
+        double  duration_u  =  (after_u - before_u)/cv::getTickFrequency();
+        ALOGD("Simple using OpenCl Cost => %f s ", duration_u );
     }
-    int64_t after_u = cv::getTickCount() ;
-    double  duration_u  =  (after_u - before_u)/cv::getTickFrequency();
-    ALOGD("Cost => %f s ", duration_u );
+
+
 }

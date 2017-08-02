@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="com.tom.opencladreon" >
+    package="com.tom.opencladreon">
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
@@ -14,21 +14,31 @@
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:supportsRtl="true"
-        android:theme="@style/AppTheme" >
-        <activity android:name=".MainActivity" >
+        android:theme="@style/AppTheme">
+
+        <activity android:name=".MainActivity">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
-
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
 
+
         <activity
             android:name=".BilateralActivity"
-            android:label="双边滤波" >
+            android:label="双边滤波">
             <intent-filter>
                 <action android:name="android.intent.action.BilateralActivity" />
                 <category android:name="android.intent.category.BilateralActivity" />
+            </intent-filter>
+        </activity>
+
+
+        <activity android:name=".RunKernelActivity"
+            android:label="运行核函数">
+            <intent-filter>
+            <action android:name="android.intent.action.RunKernelActivity" />
+            <category android:name="android.intent.category.RunKernelActivity" />
             </intent-filter>
         </activity>
 

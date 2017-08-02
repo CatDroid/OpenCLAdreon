@@ -185,7 +185,6 @@ void Init_OpenCL()
     err=clGetDeviceIDs(platform[0],CL_DEVICE_TYPE_GPU,0,NULL,&num_device);
     devices=(cl_device_id*)malloc(sizeof(cl_device_id)*num_device);
     err=clGetDeviceIDs(platform[0],CL_DEVICE_TYPE_GPU,num_device,devices,NULL);
-
 }
 
 

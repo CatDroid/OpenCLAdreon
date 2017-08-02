@@ -46,7 +46,11 @@ add_library(native-lib
              src/main/cpp/jni_bilateral.cpp
              src/main/cpp/MyCpuBilateral.cpp
              src/main/cpp/MyOclBilateral.cpp
+             src/main/cpp/sgemm.cpp
+             src/main/cpp/common/common.cpp
              )
+
+include_directories(src/main/cpp/common/)
 
 find_library(
               log-lib

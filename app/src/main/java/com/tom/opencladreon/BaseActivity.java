@@ -20,7 +20,7 @@ public class BaseActivity extends Activity {
 
     private final static String TAG = "BaseActivity";
 
-    private Handler mMsgHandler = new Handler();
+    protected Handler mMsgHandler = new Handler();
     public void toastMessage(final String message){
         mMsgHandler.post(new Runnable() {
             @Override
