@@ -9,7 +9,7 @@ cmake_minimum_required(VERSION 3.4.1)
 if( OPENCL_VENDOR MATCHES Dragon )          #高通 晓龙820 小米5
 
     include_directories(Adreon/include)
-    link_directories( Adreon/libs/${ANDROID_ABI}/ )
+    link_directories( Adreon/libs/${ANDROID_ABI}/ ) # 一定要在 add_library add_executable 之前设置
     set(CMAKE_C_FLAGS "-DUSING_DRAGON=1  ${CMAKE_C_FLAGS}")
     set(CMAKE_CXX_FLAGS "-DUSING_DRAGON=1  ${CMAKE_CXX_FLAGS}")
 
