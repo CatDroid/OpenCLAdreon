@@ -82,6 +82,31 @@ public class RunKernelActivity extends BaseActivity {
                 }
             }
         });
+
+
+        ((Button)findViewById(R.id.btnSGEMM)).setOnClickListener(new View.OnClickListener(){
+            @Override
+            public void onClick(final View v) {
+                if( checkPermissonIfNeed() ){
+                    v.setEnabled(false);
+                    mClHandler.post(new Runnable() {
+                        @Override
+                        public void run() {
+                            copyFile("simplegemm.cl");
+                            boolean done = nativeRunSimpeGEMM();
+                            toastMessage( done?"Done":"Fail" );
+                            mMsgHandler.post(new Runnable() {
+                                @Override
+                                public void run() {
+                                    v.setEnabled(true);
+                                }
+                            });
+                        }
+                    } );
+                }
+            }
+        });
+
     }
 
     @Override
@@ -95,6 +120,7 @@ public class RunKernelActivity extends BaseActivity {
     /////////////////////////////////////////////////////
 
     public native boolean nativeRunSGEMM();
+    public native boolean nativeRunSimpeGEMM();
     /////////////////////////////////////////////////////
 
     static boolean sfoundLibrary = true;

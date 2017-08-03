@@ -48,6 +48,7 @@ add_library(native-lib
              src/main/cpp/MyOclBilateral.cpp
              src/main/cpp/sgemm.cpp
              src/main/cpp/common/common.cpp
+             src/main/cpp/simplegemm.cpp
              )
 
 include_directories(src/main/cpp/common/)

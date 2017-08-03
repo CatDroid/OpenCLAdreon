@@ -16,10 +16,10 @@
         android:layout_alignParentStart="true" />
 
     <Button
-        android:id="@+id/btnGpuSobel"
+        android:id="@+id/btnSGEMM"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="Gpu Sobel"
+        android:text="普通矩阵乘法"
         android:layout_below="@+id/btnGEMM"
         android:layout_alignParentStart="true" />
 
